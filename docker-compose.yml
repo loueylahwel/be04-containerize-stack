@@ -23,9 +23,12 @@ services:
     env_file: .env
     ports:
       - "8050:8000"
+    volumes:
+      - report_data:/app/output
     depends_on:
       db:
         condition: service_healthy
 
 volumes:
   db_data:
+  report_data:

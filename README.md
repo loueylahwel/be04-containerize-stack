@@ -1,13 +1,14 @@
-# BE-04: Containerize Your Stack + W4: AI API + W5: Auth
+# BE-04: Containerize + W4: AI API & Reports + W5: Auth
 
 Backend AI Engineering — Week 2, 4 & 5 Assignments
 
 ## What This Is
 
-A FastAPI service with three features:
+A FastAPI service with four features:
 1. **Repository pattern** — swap between in-memory and Postgres with one env var (W2)
 2. **AI summarization** — call Groq's LLM API, get structured JSON back, log costs (W4)
-3. **JWT authentication** — register, login, protected routes with hashed passwords (W5)
+3. **PDF report generator** — background job that queries data, renders PDF, stores on disk (W4)
+4. **JWT authentication** — register, login, protected routes with hashed passwords (W5)
 
 ## Architecture
 
@@ -77,6 +78,10 @@ The API is at `http://localhost:8000`. Interactive docs at `http://localhost:800
 | POST | `/api/auth/register` | Register a new user (email, username, password) |
 | POST | `/api/auth/login` | Login, returns JWT token |
 | GET | `/api/auth/me` | Get current user (requires token) |
+| POST | `/api/reports/generate` | Generate PDF report (background job, requires token) |
+| GET | `/api/reports/` | List your reports (requires token) |
+| GET | `/api/reports/{id}` | Get report status (requires token) |
+| GET | `/api/reports/{id}/download` | Download PDF file (requires token) |
 | POST | `/api/summarize` | Summarize text into 3 bullet points (AI-powered, requires token) |
 
 ## Testing Auth
@@ -108,6 +113,28 @@ curl -X POST http://localhost:8050/api/summarize \
   -H "Content-Type: application/json" \
   -d '{"text": "This will fail."}'
 # → {"detail":"Not authenticated"}
+```
+
+## Testing PDF Reports
+
+```bash
+# 1. Generate a report (returns 202 immediately)
+curl -X POST http://localhost:8050/api/reports/generate \
+  -H "Authorization: Bearer eyJ..."
+# → {"id":1,"title":"Items Report by testuser","status":"pending",...}
+
+# 2. Check status (poll until completed)
+curl http://localhost:8050/api/reports/1 \
+  -H "Authorization: Bearer eyJ..."
+# → {"status":"completed","completed_at":"2026-07-12 01:09:53"}
+
+# 3. List all your reports
+curl http://localhost:8050/api/reports/ \
+  -H "Authorization: Bearer eyJ..."
+
+# 4. Download the PDF
+curl -o report.pdf http://localhost:8050/api/reports/1/download \
+  -H "Authorization: Bearer eyJ..."
 ```
 
 ## Testing the AI Feature
@@ -142,6 +169,19 @@ ai INFO summarize | provider=groq model=llama-3.1-8b-instant in=220 out=67 cost=
 - **Timeouts:** 30s timeout on every LLM call.
 - **Smart retries:** 429 (rate limit) and 5xx (server error) retry with exponential backoff. 400 errors never retried.
 - **Cost logging:** Every call logs provider, model, input/output tokens, and estimated cost in USD.
+
+## PDF Report Generator (W4)
+
+```
+backend/app/reports/
+├── pdf_generator.py  # ReportLab PDF rendering
+└── runner.py         # Background job: query → render → store
+```
+
+- **Background job:** `POST /api/reports/generate` returns 202 immediately, runs in background
+- **Status tracking:** `reports` table in Postgres tracks pending/running/completed/failed
+- **PDF stored on disk:** not passed around — download via `GET /api/reports/{id}/download`
+- **SQL aggregation:** queries all items, renders into a styled PDF table
 
 ## Proving Persistence
 
@@ -209,6 +249,7 @@ curl http://localhost:8000/api/items/
 │       ├── routes/
 │       │   ├── items.py      # CRUD routes (unchanged regardless of repo)
 │       │   ├── auth.py       # Register, login, /me
+│       │   ├── reports.py    # Generate, list, status, download PDF
 │       │   └── summarize.py  # POST /summarize — AI-powered (protected)
 │       ├── auth/
 │       │   ├── passwords.py  # bcrypt hash/verify
@@ -225,6 +266,9 @@ curl http://localhost:8000/api/items/
 │           └── providers/
 │               ├── base.py        # Abstract AIProvider interface
 │               └── groq_provider.py # Groq implementation
+│       └── reports/
+│           ├── pdf_generator.py  # ReportLab PDF rendering
+│           └── runner.py         # Background job runner
 ```
 
 ## Key Design Decisions
