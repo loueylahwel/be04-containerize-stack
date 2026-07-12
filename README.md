@@ -1,12 +1,13 @@
-# BE-04: Containerize Your Stack + W4: Connect to an AI API
+# BE-04: Containerize Your Stack + W4: AI API + W5: Auth
 
-Backend AI Engineering — Week 2 & Week 4 Assignments
+Backend AI Engineering — Week 2, 4 & 5 Assignments
 
 ## What This Is
 
-A FastAPI service with two features:
+A FastAPI service with three features:
 1. **Repository pattern** — swap between in-memory and Postgres with one env var (W2)
 2. **AI summarization** — call Groq's LLM API, get structured JSON back, log costs (W4)
+3. **JWT authentication** — register, login, protected routes with hashed passwords (W5)
 
 ## Architecture
 
@@ -32,6 +33,20 @@ backend/app/ai/
 ```
 
 Every AI call goes through `ai.client.summarize()`. The provider is injected at startup based on `AI_PROVIDER` env var. Switching providers touches **only the providers/ directory**.
+
+## Authentication (W5)
+
+```
+backend/app/auth/
+├── passwords.py      # bcrypt hash + verify
+├── jwt.py            # JWT create + decode
+└── dependencies.py   # get_current_user dependency
+```
+
+- **Passwords** hashed with bcrypt (passlib). Never stored in plaintext.
+- **JWT tokens** issued on login, verified on protected routes.
+- **Protected route:** `POST /api/summarize` requires `Authorization: Bearer <token>` header.
+- **Honest responses:** 401 for missing/invalid tokens, 409 for duplicate email/username.
 
 ## Quick Start
 
@@ -59,7 +74,41 @@ The API is at `http://localhost:8000`. Interactive docs at `http://localhost:800
 | GET | `/api/items/{id}` | Get one item |
 | PUT | `/api/items/{id}` | Update an item |
 | DELETE | `/api/items/{id}` | Delete an item |
-| POST | `/api/summarize` | Summarize text into 3 bullet points (AI-powered) |
+| POST | `/api/auth/register` | Register a new user (email, username, password) |
+| POST | `/api/auth/login` | Login, returns JWT token |
+| GET | `/api/auth/me` | Get current user (requires token) |
+| POST | `/api/summarize` | Summarize text into 3 bullet points (AI-powered, requires token) |
+
+## Testing Auth
+
+```bash
+# 1. Register
+curl -X POST http://localhost:8050/api/auth/register \
+  -H "Content-Type: application/json" \
+  -d '{"email":"you@example.com","username":"you","password":"secret123"}'
+
+# 2. Login (returns JWT)
+curl -X POST http://localhost:8050/api/auth/login \
+  -H "Content-Type: application/json" \
+  -d '{"email":"you@example.com","password":"secret123"}'
+# → {"access_token":"eyJ...","token_type":"bearer"}
+
+# 3. Get current user
+curl http://localhost:8050/api/auth/me \
+  -H "Authorization: Bearer eyJ..."
+
+# 4. Call protected route (summarize)
+curl -X POST http://localhost:8050/api/summarize \
+  -H "Content-Type: application/json" \
+  -H "Authorization: Bearer eyJ..." \
+  -d '{"text": "Your text to summarize here."}'
+
+# 5. Without token → 401
+curl -X POST http://localhost:8050/api/summarize \
+  -H "Content-Type: application/json" \
+  -d '{"text": "This will fail."}'
+# → {"detail":"Not authenticated"}
+```
 
 ## Testing the AI Feature
 
@@ -159,7 +208,12 @@ curl http://localhost:8000/api/items/
 │       ├── schemas.py        # Pydantic request/response models
 │       ├── routes/
 │       │   ├── items.py      # CRUD routes (unchanged regardless of repo)
-│       │   └── summarize.py  # POST /summarize — AI-powered summarization
+│       │   ├── auth.py       # Register, login, /me
+│       │   └── summarize.py  # POST /summarize — AI-powered (protected)
+│       ├── auth/
+│       │   ├── passwords.py  # bcrypt hash/verify
+│       │   ├── jwt.py        # JWT create/decode
+│       │   └── dependencies.py # get_current_user
 │       ├── repositories/
 │       │   ├── base.py       # Abstract interface
 │       │   ├── in_memory.py  # Dict storage
@@ -189,3 +243,6 @@ curl http://localhost:8000/api/items/
 | `AI_PROVIDER` | LLM provider | `groq` |
 | `GROQ_API_KEY` | Groq API key (free, no card) | — |
 | `GROQ_MODEL` | Groq model to use | `llama-3.1-8b-instant` |
+| `JWT_SECRET` | Secret key for JWT signing | `change-me-to-a-random-64-char-string` |
+| `JWT_ALGORITHM` | JWT algorithm | `HS256` |
+| `JWT_EXPIRE_MINUTES` | Token expiry in minutes | `60` |

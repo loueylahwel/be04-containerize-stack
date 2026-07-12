@@ -5,6 +5,7 @@ from fastapi import FastAPI
 from .config import settings
 from .routes.items import router as items_router, set_repository
 from .routes.summarize import router as summarize_router
+from .routes.auth import router as auth_router
 from .ai import set_provider
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(name)s %(levelname)s %(message)s")
@@ -51,6 +52,7 @@ app = FastAPI(title="BE-04 Item Service", version="1.0.0", lifespan=lifespan)
 
 app.include_router(items_router)
 app.include_router(summarize_router)
+app.include_router(auth_router)
 
 
 @app.get("/api/health")

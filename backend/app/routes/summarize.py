@@ -1,6 +1,7 @@
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Depends
 from pydantic import BaseModel
 from ..ai import summarize
+from ..auth import get_current_user
 
 router = APIRouter(prefix="/api", tags=["ai"])
 
@@ -15,7 +16,7 @@ class SummarizeResponse(BaseModel):
 
 
 @router.post("/summarize", response_model=SummarizeResponse)
-async def post_summarize(req: SummarizeRequest):
+async def post_summarize(req: SummarizeRequest, current_user: dict = Depends(get_current_user)):
     if not req.text.strip():
         raise HTTPException(status_code=400, detail="Text cannot be empty")
 
