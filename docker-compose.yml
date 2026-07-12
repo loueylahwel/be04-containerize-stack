@@ -10,7 +10,7 @@ services:
       - db_data:/var/lib/postgresql/data
       - ./backend/sql/init.sql:/docker-entrypoint-initdb.d/init.sql
     ports:
-      - "5432:5432"
+      - "5434:5432"
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U postgres -d items_db"]
       interval: 2s
@@ -22,7 +22,7 @@ services:
     restart: unless-stopped
     env_file: .env
     ports:
-      - "8000:8000"
+      - "8050:8000"
     depends_on:
       db:
         condition: service_healthy
