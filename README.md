@@ -1,10 +1,12 @@
-# BE-04: Containerize Your Stack
+# BE-04: Containerize Your Stack + W4: Connect to an AI API
 
-Backend AI Engineering — Week 2 Assignment
+Backend AI Engineering — Week 2 & Week 4 Assignments
 
 ## What This Is
 
-A FastAPI item service that proves the repository pattern works by swapping between an in-memory store and Postgres with a single environment variable. Docker Compose starts both the app and database together.
+A FastAPI service with two features:
+1. **Repository pattern** — swap between in-memory and Postgres with one env var (W2)
+2. **AI summarization** — call Groq's LLM API, get structured JSON back, log costs (W4)
 
 ## Architecture
 
@@ -16,6 +18,20 @@ backend/app/repositories/
 ```
 
 Routes (`/api/items`) never know which backend is active — they receive the repository via dependency injection from `get_repository()`. Switching storage changes **one env var** and **one file**.
+
+## AI Provider Seam
+
+```
+backend/app/ai/
+├── providers/
+│   ├── base.py            # Abstract AIProvider interface
+│   └── groq_provider.py   # Groq (free tier, no card)
+├── client.py              # Single seam — summarize() calls the LLM here
+├── schemas.py             # Pydantic output validation (SummarizeOutput)
+└── cost.py                # Token cost estimation from public pricing
+```
+
+Every AI call goes through `ai.client.summarize()`. The provider is injected at startup based on `AI_PROVIDER` env var. Switching providers touches **only the providers/ directory**.
 
 ## Quick Start
 
@@ -43,6 +59,40 @@ The API is at `http://localhost:8000`. Interactive docs at `http://localhost:800
 | GET | `/api/items/{id}` | Get one item |
 | PUT | `/api/items/{id}` | Update an item |
 | DELETE | `/api/items/{id}` | Delete an item |
+| POST | `/api/summarize` | Summarize text into 3 bullet points (AI-powered) |
+
+## Testing the AI Feature
+
+```bash
+# Summarize a block of text
+curl -X POST http://localhost:8050/api/summarize \
+  -H "Content-Type: application/json" \
+  -d '{"text": "Docker is a platform for developing, shipping, and running applications in containers. Containers are lightweight, portable, and self-sufficient. Docker Compose is a tool for defining and running multi-container applications."}'
+```
+
+Response:
+```json
+{
+  "title": "Docker Overview",
+  "bullets": [
+    "Docker is a platform for developing, shipping, and running applications in containers.",
+    "Docker Compose is a tool for defining and running multi-container Docker applications.",
+    "Containers are lightweight, portable, and self-sufficient."
+  ]
+}
+```
+
+Server logs show cost per call:
+```
+ai INFO summarize | provider=groq model=llama-3.1-8b-instant in=220 out=67 cost=$0.016360
+```
+
+### Reliability Features
+
+- **Structured output:** Response validated against Pydantic schema. Malformed JSON → retry once with correction prompt.
+- **Timeouts:** 30s timeout on every LLM call.
+- **Smart retries:** 429 (rate limit) and 5xx (server error) retry with exponential backoff. 400 errors never retried.
+- **Cost logging:** Every call logs provider, model, input/output tokens, and estimated cost in USD.
 
 ## Proving Persistence
 
@@ -104,15 +154,23 @@ curl http://localhost:8000/api/items/
 │   ├── sql/
 │   │   └── init.sql          # Table creation (mounted into Postgres)
 │   └── app/
-│       ├── main.py           # FastAPI app, repo swap via env var
+│       ├── main.py           # FastAPI app, repo + AI provider swap via env vars
 │       ├── config.py         # Pydantic Settings
 │       ├── schemas.py        # Pydantic request/response models
 │       ├── routes/
-│       │   └── items.py      # CRUD routes (unchanged regardless of repo)
-│       └── repositories/
-│           ├── base.py       # Abstract interface
-│           ├── in_memory.py  # Dict storage
-│           └── postgres.py   # Postgres via SQLAlchemy
+│       │   ├── items.py      # CRUD routes (unchanged regardless of repo)
+│       │   └── summarize.py  # POST /summarize — AI-powered summarization
+│       ├── repositories/
+│       │   ├── base.py       # Abstract interface
+│       │   ├── in_memory.py  # Dict storage
+│       │   └── postgres.py   # Postgres via SQLAlchemy
+│       └── ai/
+│           ├── client.py     # summarize() — the single AI seam
+│           ├── schemas.py    # SummarizeOutput (Pydantic validation)
+│           ├── cost.py       # Token cost estimation
+│           └── providers/
+│               ├── base.py        # Abstract AIProvider interface
+│               └── groq_provider.py # Groq implementation
 ```
 
 ## Key Design Decisions
@@ -128,3 +186,6 @@ curl http://localhost:8000/api/items/
 |----------|-------------|---------|
 | `DATABASE_URL` | Postgres connection string | `postgresql+psycopg2://postgres:postgres@db:5432/items_db` |
 | `REPO_BACKEND` | `postgres` or `memory` | `postgres` |
+| `AI_PROVIDER` | LLM provider | `groq` |
+| `GROQ_API_KEY` | Groq API key (free, no card) | — |
+| `GROQ_MODEL` | Groq model to use | `llama-3.1-8b-instant` |
